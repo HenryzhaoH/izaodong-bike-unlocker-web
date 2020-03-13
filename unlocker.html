@@ -1,0 +1,309 @@
+<html>
+
+<head>
+    <title>iZaoDong Unlocker Alpha</title>
+    <!--Import Google Icon Font-->
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+    <!--Import materialize.css-->
+    <link type="text/css" rel="stylesheet" href="css/materialize.min.css" media="screen,projection" />
+
+    <!--Let browser know website is optimized for mobile-->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+</head>
+
+<body>
+    <div class="container left-align">
+        <!-- Page Content goes here -->
+        <div class="row"></div>
+        <div class="row">
+            <div class="preloader-wrapper big" id='loading'>
+                <div class="spinner-layer spinner-blue-only">
+                    <div class="circle-clipper left">
+                        <div class="circle"></div>
+                    </div>
+                    <div class="gap-patch">
+                        <div class="circle"></div>
+                    </div>
+                    <div class="circle-clipper right">
+                        <div class="circle"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="row">
+            <div class="col s4">
+                <a class="waves-effect waves-light btn-large" id='ble_init_button'>BLE</a>
+            </div>
+            <!-- </div>
+        <div class="row"> -->
+            <div class="col s4">
+                <a class="waves-effect waves-light btn-large" id='isgadata' disabled>INIT</a>
+            </div>
+            <div class="col s4">
+                <a class="waves-effect waves-light btn-large" id='unlock'>Unlock</a>
+            </div>
+        </div>
+        <div class="row">
+            <div class="col s8">
+                <p class="range-field">
+                    <input type="range" id="diff_range" min="0" max="20" value="0" />
+                </p>
+            </div>
+            <div class="col s4">
+                <a class="waves-effect waves-light btn-large" id='diff_btn'>SetDiff</a>
+            </div>
+        </div>
+        <div class="row">
+            <div class="col s4">
+                Debug
+            </div>
+        </div>
+        <div class="row">
+            <div class="col s4">
+                <a class="waves-effect waves-light btn-large" id='getname'>GetName</a>
+            </div>
+        </div>
+        <div class="row left-align" style="overflow-x: hidden">
+            <pre id='log'></pre>
+        </div>
+    </div>
+
+    <script>
+        var connected_device = undefined;
+
+        var SERVICE_UUID = "0000ffe0-0000-1000-8000-00805f9b34fb";
+        var WRITE_UUID = "0000ffe9-0000-1000-8000-00805f9b34fb";
+        var READ_UUID = "0000ffe4-0000-1000-8000-00805f9b34fb";
+
+        (function () {
+            var old = console.log;
+            var logger = document.getElementById('log');
+            console.log = function () {
+                for (var i = 0; i < arguments.length; i++) {
+                    if (typeof arguments[i] == 'object') {
+                        logger.innerHTML = (JSON && JSON.stringify ? JSON.stringify(arguments[i], undefined,
+                            0) : arguments[i]) + '<br />' + logger.innerHTML;
+                    } else {
+                        logger.innerHTML = arguments[i] + '<br />' + logger.innerHTML;
+                    }
+                }
+            }
+        })();
+
+        if (navigator.bluetooth === undefined) {
+            alert("Chrome 56+ only.")
+        }
+
+        function stablize_ble() {
+            writeCharacteristic(SERVICE_UUID, WRITE_UUID, isGAData());
+        }
+
+        document.querySelector("#unlock").addEventListener('click', function (event) {
+            writeCharacteristic(SERVICE_UUID, WRITE_UUID, unlockData());
+        })
+        document.querySelector("#isgadata").addEventListener('click', function (event) {
+            stablize_ble();
+        })
+        document.querySelector("#diff_btn").addEventListener('click', function (event) {
+            writeCharacteristic(SERVICE_UUID, WRITE_UUID, difficultyData(
+                document.querySelector("#diff_range").value
+            ));
+        })
+        document.querySelector("#getname").addEventListener('click', function (event) {
+            console.log(readCharacteristic("generic_access", 0x2a00));
+        })
+
+        document.querySelector("#ble_init_button").addEventListener('click', function (event) {
+            loading(true);
+            connected_device = undefined;
+            navigator.bluetooth.requestDevice({
+                //acceptAllDevices: true,
+                optionalServices: ['generic_access', SERVICE_UUID],
+                filters: [{
+                    services: [SERVICE_UUID]
+                }]
+            })
+                .then(device => {
+                    console.log("Connected!");
+                    connected_device = device;
+                    console.log(device);
+                    return device.gatt.connect();
+                })
+                .then(server => {
+                    // Note that we could also get all services that match a specific UUID by
+                    // passing it to getPrimaryServices().
+                    console.log('Getting Services...');
+                    return server.getPrimaryServices();
+                })
+                .then(services => {
+                    console.log('Getting Characteristics...');
+                    let foundflag = false;
+                    let queue = Promise.resolve();
+                    services.forEach(service => {
+                        queue = queue.then(_ => service.getCharacteristics().then(
+                            characteristics => {
+                                console.log('> Service: ' + service.uuid);
+                                if (service.uuid == SERVICE_UUID) {
+                                    foundflag = true;
+                                }
+                            }))
+                            .then(_ => {
+                                if (!foundflag) {
+                                    console.log("Bike Service not found. Try another device?")
+                                } else {
+                                    stablize_ble();
+                                    loading(false);
+                                }
+                            });
+                    });
+                    return queue;
+                })
+                .catch(error => {
+                    console.log(error.code);
+                    console.log(error.message);
+                    //alert(error.message);
+                    loading(false);
+                });
+            /*
+            .then(server => {
+                console.log('get service');
+                console.log(server)
+                //return server.getPrimaryService('0000ffe0-0000-1000-8000-00805f9b34fb');
+                return server.getPrimaryService("generic_access");
+            })
+            .then(service => {
+                console.log('get char');
+                console.log(service);
+                //return service.getCharacteristic('0000ffe4-0000-1000-8000-00805f9b34fb');
+                return service.getCharacteristic(0x2a00);
+            })
+            .then(characteristic => {
+                console.log('read val');
+                return characteristic.readValue();
+            })
+            .then(value => {
+                console.log(value);
+                alert(value)
+            })
+            .catch(error => {
+                console.log(error.code);
+                console.log(error.message);
+                alert(error.message)
+            });
+            */
+        });
+
+        function readCharacteristic(service_uuid, characteristic_uuid) {
+            loading(true);
+            if (connected_device === undefined) {
+                loading(false);
+                console.log("Connect First.");
+                return;
+            }
+            connected_device.gatt.connect().then(server => {
+                console.log('get server');
+                console.log(server);
+                //return server.getPrimaryService('0000ffe0-0000-1000-8000-00805f9b34fb');
+                return server.getPrimaryService(service_uuid);
+            })
+                .then(service => service.getCharacteristic(characteristic_uuid))
+                .then(characteristic => {
+                    console.log('read val');
+                    return characteristic.readValue();
+                })
+                .then(value => {
+                    loading(false);
+                    let decoder = new TextDecoder('utf-8');
+                    console.log(decoder.decode(value));
+                }).catch(error => {
+                    console.log(error.code);
+                    console.log(error.message);
+                    loading(false);
+                    //alert(error.message);
+                });
+        }
+
+        function writeCharacteristic(service_uuid, characteristic_uuid, data) {
+            loading(true);
+            if (connected_device === undefined) {
+                loading(false);
+                console.log("Connect First.");
+                return;
+            }
+            connected_device.gatt.connect().then(server => {
+                console.log('get server');
+                console.log(server)
+                //return server.getPrimaryService('0000ffe0-0000-1000-8000-00805f9b34fb');
+                return server.getPrimaryService(service_uuid);
+            })
+                .then(service => service.getCharacteristic(characteristic_uuid)).then(characteristic => {
+                    // Writing 1 is the signal to reset energy expended.
+                    var resetEnergyExpended = data;
+                    console.log(data)
+                    return characteristic.writeValue(resetEnergyExpended);
+                })
+                .then(_ => {
+                    console.log('writing');
+                    loading(false);
+                })
+                .catch(error => {
+                    console.log(error.code);
+                    console.log(error.message);
+                    loading(false);
+                });
+        }
+
+        function loading(flag) {
+            if (flag) {
+                document.querySelector("#loading").classList.add("active");
+            } else {
+                document.querySelector("#loading").classList.remove("active");
+            }
+        }
+
+
+
+        getCrc = function (data, data_length) {
+            var t = 0,
+                c = 0,
+                o = 0;
+            if (data.length < data_length) return 0;
+            for (var u = 0; u < data_length && (t = (t + (255 & data[u])) % 256, c = (c + t) % 256, ++o !=
+                data_length); u++);
+            return [t, c]
+        }
+        randomNum = function (e, n) {
+            return Math.floor(Math.random() * (n - e + 1) + e)
+        }
+        typeArray = function (e) {
+            var n = new Uint8Array(e);
+            return Array.from(n)
+        }
+        difficultyData = function (e) {
+            for (var n = [], t = e || 0, c = 0; c <= 13; c++) n.push(0);
+            n[0] = parseInt("23", 16), n[1] = parseInt("24", 16), n[2] = parseInt("25", 16), n[3] = parseInt(t);
+            var o = n.slice(0, n.length),
+                u = this.getCrc(o, o.length);
+            return n.push(u[0]), n.push(u[1]), new Uint8Array(n)
+        }
+        unlockData = function () {
+            for (var n = [], t = 0; t <= 13; t++) n.push(0);
+            n[0] = parseInt("1", 16), n[1] = randomNum(0, 200), n[2] = randomNum(0, 200);
+            var c = n.slice(0, n.length),
+                o = getCrc(c, c.length);
+            return n.push(o[0]), n.push(o[1]), new Uint8Array(n)
+        }
+        isGAData = function () {
+            for (var n = [], t = 0; t <= 13; t++) n.push(0);
+            n[0] = parseInt("3", 16), n[1] = randomNum(0, 200), n[2] = randomNum(0, 200);
+            var c = n.slice(0, n.length),
+                o = getCrc(c, c.length);
+            return n.push(o[0]), n.push(o[1]), new Uint8Array(n)
+        }
+    </script>
+
+    <!--JavaScript at end of body for optimized loading-->
+    <script type="text/javascript" src="js/materialize.min.js"></script>
+</body>
+
+</html>
